@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.vscode/
+.idea/
+
+# 教材数据（不上传到 GitHub，单文件可能 >100MB）
+data/textbooks/*.pdf
+*.pdf
+backend/storage/
+
+# 日志与临时
+*.log
+*.tmp
+.DS_Store
