@@ -27,8 +27,14 @@ def extract_graph(req: GraphExtractRequest):
 
 
 @router.get("", response_model=KnowledgeGraph)
-def get_merged_graph():
-    return state.MERGED_GRAPH
+def get_merged_graph(include_images: bool = False):
+    merged = state.MERGED_GRAPH
+    if not include_images and merged and merged.nodes:
+        nodes = [n for n in merged.nodes if n.category != "图像区块"]
+        node_ids = {n.id for n in nodes}
+        edges = [e for e in merged.edges if e.source in node_ids and e.target in node_ids]
+        return KnowledgeGraph(textbook_id=merged.textbook_id, nodes=nodes, edges=edges)
+    return merged
 
 
 @router.post("/merge", response_model=GraphMergeResponse)
@@ -262,8 +268,14 @@ def get_modification_history():
 
 
 @router.get("/{textbook_id}", response_model=KnowledgeGraph)
-def get_graph(textbook_id: str):
-    return state.GRAPHS.get(textbook_id, KnowledgeGraph(textbook_id=textbook_id))
+def get_graph(textbook_id: str, include_images: bool = False):
+    g = state.GRAPHS.get(textbook_id, KnowledgeGraph(textbook_id=textbook_id))
+    if not include_images and g and g.nodes:
+        nodes = [n for n in g.nodes if n.category != "图像区块"]
+        node_ids = {n.id for n in nodes}
+        edges = [e for e in g.edges if e.source in node_ids and e.target in node_ids]
+        return KnowledgeGraph(textbook_id=textbook_id, nodes=nodes, edges=edges)
+    return g
 
 
 def _execute_modification(instruction: str) -> dict:

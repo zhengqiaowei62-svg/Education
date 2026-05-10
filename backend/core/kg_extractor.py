@@ -244,6 +244,9 @@ def _visual_block_graph(textbook, existing_nodes: list[KGNode]) -> tuple[list[KG
     edges: list[KGEdge] = []
     visual_blocks = [b for b in getattr(textbook, "blocks", []) if b.kind in {"image", "table", "figure"}]
     for block in visual_blocks[:40]:
+        # 只为有实质文字内容的区块创建节点，跳过无意义的空图像区块
+        if len((block.text or "").strip()) < 20:
+            continue
         node_id = f"{textbook.textbook_id}_{block.block_id}_visual"
         node = KGNode(
             id=node_id,
