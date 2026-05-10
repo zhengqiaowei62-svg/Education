@@ -213,8 +213,10 @@ _THINK = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 
 def _strip_think(text: str) -> str:
     """剥离 <think>…</think> 推理段；若标签未闭合，截到最后一个 </think>。"""
-    if not text or "<think>" not in text:
-        return text or ""
+    if not text:
+        return ""
+    if "<think>" not in text:
+        return text.strip()
     cleaned = _THINK.sub("", text)
     if "<think>" in cleaned:
         idx = cleaned.rfind("</think>")
