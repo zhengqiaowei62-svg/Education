@@ -352,6 +352,78 @@ function applyHighlight() {
 
 watch([searchQuery, filterTextbook], () => applyHighlight())
 
+// ----- 矩阵热力图视图 -----
+// 横轴：教材；纵轴：类别；色深：节点数
+function renderMatrix() {
+  const cvs = matrixCanvas.value
+  if (!cvs) return
+  const dpr = window.devicePixelRatio || 1
+  const w = container.value.clientWidth
+  const h = container.value.clientHeight
+  cvs.width = w * dpr
+  cvs.height = h * dpr
+  cvs.style.width = w + 'px'
+  cvs.style.height = h + 'px'
+  const ctx = cvs.getContext('2d')
+  ctx.scale(dpr, dpr)
+  ctx.clearRect(0, 0, w, h)
+  // 收集 books × categories
+  const books = textbookOptions.value.length
+    ? textbookOptions.value.map(o => o.id)
+    : ['unknown']
+  const titleOf = id => (textbookOptions.value.find(o => o.id === id)?.title || id).slice(0, 8)
+  const cats = ['核心概念', '定理', '方法', '现象', '图像区块']
+  const matrix = cats.map(() => books.map(() => 0))
+  rawData.nodes.forEach(n => {
+    const cat = n.raw?.category || '核心概念'
+    const ci = cats.indexOf(cat)
+    if (ci < 0) return
+    const ids = String(n.raw?.textbook_id || '').split(',').map(s => s.trim()).filter(Boolean)
+    ids.forEach(id => {
+      const bi = books.indexOf(id)
+      if (bi >= 0) matrix[ci][bi] += 1
+    })
+  })
+  const flat = matrix.flat()
+  const maxV = Math.max(1, ...flat)
+  const padL = 110, padT = 60
+  const cellW = Math.max(28, (w - padL - 24) / books.length)
+  const cellH = Math.max(28, (h - padT - 40) / cats.length)
+  ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif'
+  ctx.fillStyle = '#34433c'
+  ctx.fillText('类别 × 教材 · 节点数热力图', padL, 24)
+  // 列标题
+  books.forEach((b, j) => {
+    ctx.save()
+    ctx.translate(padL + j * cellW + cellW / 2, padT - 8)
+    ctx.rotate(-Math.PI / 6)
+    ctx.fillStyle = '#5a6b62'
+    ctx.fillText(titleOf(b), 0, 0)
+    ctx.restore()
+  })
+  // 行标题 + 单元格
+  cats.forEach((c, i) => {
+    ctx.fillStyle = '#5a6b62'
+    ctx.fillText(c, 8, padT + i * cellH + cellH / 2 + 4)
+    books.forEach((_, j) => {
+      const v = matrix[i][j]
+      const t = v / maxV
+      // 色阶：浅 → 深绿
+      const r = Math.round(247 - 130 * t)
+      const g = Math.round(251 - 60 * t)
+      const b = Math.round(248 - 130 * t)
+      ctx.fillStyle = `rgb(${r},${g},${b})`
+      ctx.fillRect(padL + j * cellW + 2, padT + i * cellH + 2, cellW - 4, cellH - 4)
+      if (v > 0) {
+        ctx.fillStyle = t > 0.5 ? '#fff' : '#34433c'
+        ctx.textAlign = 'center'
+        ctx.fillText(String(v), padL + j * cellW + cellW / 2, padT + i * cellH + cellH / 2 + 4)
+        ctx.textAlign = 'start'
+      }
+    })
+  })
+}
+
 function saveNodeEdit() {
   if (!editNode.value) return
   const model = editNode.value.getModel()
@@ -409,6 +481,7 @@ onBeforeUnmount(() => {
           <button :class="{ active: viewMode === 'force' }" @click="switchMode('force')">漫游图</button>
           <button :class="{ active: viewMode === 'tree' }" @click="switchMode('tree')">知识树</button>
           <button :class="{ active: viewMode === 'canvas' }" @click="switchMode('canvas')">自由画布</button>
+          <button :class="{ active: viewMode === 'matrix' }" @click="switchMode('matrix')">矩阵热力</button>
         </div>
         <div class="legend">
           <div v-for="(label, key) in { prerequisite: '前置依赖', parallel: '并列', contains: '包含', applies_to: '应用' }" :key="key">
@@ -431,7 +504,15 @@ onBeforeUnmount(() => {
       extraClass="absolute right-10 bottom-10 opacity-[0.07] drift-slow pointer-events-none"
     />
     <div class="graph-grid" aria-hidden="true"></div>
-    <div ref="container" class="graph-canvas"></div>
+    <div ref="container" class="graph-canvas">
+      <canvas
+        v-show="viewMode === 'matrix'"
+        ref="matrixCanvas"
+        style="position:absolute;inset:0;width:100%;height:100%;"
+      ></canvas>
+    </div>
+    <div v-if="mergeBusy" class="merge-toast" style="position:absolute;top:84px;right:24px;background:#34433c;color:#fff;padding:8px 14px;border-radius:8px;z-index:30;font-size:13px;">合并中…</div>
+    <div v-else-if="mergeToast" class="merge-toast" style="position:absolute;top:84px;right:24px;background:#34433c;color:#fff;padding:8px 14px;border-radius:8px;z-index:30;font-size:13px;">{{ mergeToast }}</div>
 
     <div v-if="loading" class="graph-overlay">
       <div class="loading-card">载入图谱中…</div>

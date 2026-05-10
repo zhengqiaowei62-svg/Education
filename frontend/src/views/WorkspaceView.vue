@@ -15,8 +15,10 @@ import {
   uploadFiles,
 } from '../api'
 import BioDecor from '../components/BioDecor.vue'
+import DashboardView from './DashboardView.vue'
 
 const emit = defineEmits(['open-graph', 'home'])
+const showDashboard = ref(false)
 
 const fileInput = ref(null)
 const graphContainer = ref(null)
@@ -354,6 +356,7 @@ onBeforeUnmount(() => {
         <button class="btn-ghost btn-compact" :disabled="indexing || !selectedIds.size" @click="onIndex">
           {{ indexing ? '索引中…' : '建立索引' }}
         </button>
+        <button class="btn-primary btn-compact" @click="showDashboard = true" style="margin-right:8px;">仪表盘</button>
         <button class="btn-primary btn-compact" @click="emit('open-graph')">全屏图谱</button>
       </div>
     </header>
@@ -585,5 +588,6 @@ onBeforeUnmount(() => {
         <blockquote>{{ sourcePreview.text || sourcePreview.quote }}</blockquote>
       </aside>
     </transition>
+    <DashboardView v-if="showDashboard" @close="showDashboard = false" />
   </section>
 </template>

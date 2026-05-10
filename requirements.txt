@@ -20,5 +20,9 @@ numpy==1.26.4
 python-dotenv==1.0.1
 httpx==0.27.0
 
+# 报告导出（PDF）— Windows 下可选；失败时 /api/report/pdf 优雅降级
+markdown==3.6
+weasyprint==62.3
+
 # 测试
 pytest>=7.0.0
