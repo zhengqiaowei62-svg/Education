@@ -16,6 +16,7 @@ class ChatRequest(BaseModel):
     message: str
     top_k: int = 5
     search_mode: str = "hybrid"
+    history: List[dict] = []  # 多轮对话历史 [{role, content}]
 
 
 class ChatResponse(BaseModel):
@@ -42,6 +43,7 @@ def chat_endpoint(req: ChatRequest):
                 question=req.message,
                 top_k=req.top_k,
                 search_mode=req.search_mode,
+                history=req.history,
             )
             return ChatResponse(
                 intent="RAG",

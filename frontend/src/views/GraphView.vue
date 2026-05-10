@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import G6 from '@antv/g6'
-import { getMergedGraph, listTextbooks } from '../api'
+import { getMergedGraph, listTextbooks, mergeNodesByDrag } from '../api'
 import BioDecor from '../components/BioDecor.vue'
 
 const emit = defineEmits(['back'])
@@ -17,6 +17,12 @@ const stats = ref({ nodes: 0, edges: 0 })
 const searchQuery = ref('')
 const filterTextbook = ref('all')
 const textbookOptions = ref([]) // [{id, title}]
+
+// 拖拽合并 + 矩阵视图
+const dragMergeSource = ref(null)
+const mergeBusy = ref(false)
+const mergeToast = ref('')
+const matrixCanvas = ref(null)
 
 let graph = null
 let rawData = { nodes: [], edges: [] }
@@ -173,6 +179,33 @@ function bindEvents() {
     const model = event.item.getModel()
     nodePositions.set(model.id, { x: model.x, y: model.y })
   })
+  // ---- 拖拽合并：按住 Shift 把 A 拖到 B 上 → 调用 LLM 合并 ----
+  graph.on('node:dragstart', event => {
+    if (event.originalEvent && event.originalEvent.shiftKey) {
+      dragMergeSource.value = event.item.getModel()
+    } else {
+      dragMergeSource.value = null
+    }
+  })
+  graph.on('node:drop', async event => {
+    const target = event.item.getModel()
+    const source = dragMergeSource.value
+    dragMergeSource.value = null
+    if (!source || source.id === target.id) return
+    const ok = window.confirm(`将「${source.label}」与「${target.label}」合并为同一节点？`)
+    if (!ok) return
+    try {
+      mergeBusy.value = true
+      const res = await mergeNodesByDrag(source.label, target.label)
+      mergeToast.value = res?.message || '已请求合并'
+      await load()
+    } catch (e) {
+      mergeToast.value = '合并失败：' + (e?.message || e)
+    } finally {
+      mergeBusy.value = false
+      setTimeout(() => (mergeToast.value = ''), 4000)
+    }
+  })
   graph.on('node:mouseenter', event => {
     const item = event.item
     graph.setItemState(item, 'active', true)
@@ -194,6 +227,11 @@ function renderGraph() {
   if (!container.value) return
   destroyGraph()
   if (!rawData.nodes.length) return
+  if (viewMode.value === 'matrix') {
+    // 矩阵热力图视图：用 canvas 自绘，按教材分组
+    nextTick(() => renderMatrix())
+    return
+  }
   if (viewMode.value === 'tree') {
     graph = new G6.TreeGraph({
       ...baseConfig(),

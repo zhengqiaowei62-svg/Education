@@ -63,6 +63,7 @@ class KGNode(BaseModel):
     page: int = 0
     textbook_id: str = ""
     frequency: int = 1  # 跨教材出现次数（融合后）
+    confidence: float = 1.0  # 抽取置信度
     bbox: List[float] = []
     source_block_id: Optional[str] = None
     source_url: Optional[str] = None

@@ -31,3 +31,19 @@ export const ragQuery = (question, top_k = 5, search_mode = 'hybrid', history = 
 export const ragStatus = () => http.get('/rag/status').then(r => r.data)
 export const getRagSource = (chunkId) => http.get(`/rag/source/${chunkId}`).then(r => r.data)
 export const health = () => http.get('/health').then(r => r.data)
+
+// ---- 统计 / 报告 / 基准 ----
+export const getTokenStats = () => http.get('/stats/tokens').then(r => r.data)
+export const resetTokenStats = () => http.post('/stats/tokens/reset').then(r => r.data)
+export const getGraphStats = () => http.get('/stats/graph').then(r => r.data)
+export const runBenchmark = () => http.post('/stats/benchmark').then(r => r.data)
+export const reportMarkdown = () => http.get('/report/markdown').then(r => r.data)
+// 用于 <a download> 的直链（注意带 baseURL）
+export const reportDownloadUrl = '/api/report/download'
+export const reportPdfUrl = '/api/report/pdf'
+
+// ---- 图谱：拖拽合并 / 修改 ----
+export const modifyGraph = (instruction, node_ids = null) =>
+  http.post('/graph/modify', { instruction, node_ids }).then(r => r.data)
+export const mergeNodesByDrag = (sourceName, targetName) =>
+  modifyGraph(`将节点「${sourceName}」与「${targetName}」合并为同一个节点`, null)

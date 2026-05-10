@@ -6,7 +6,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import upload, graph, rag, chat
+from backend.api import upload, graph, rag, chat, stats
 
 app = FastAPI(
     title="学科知识整合智能体",
@@ -34,3 +34,4 @@ app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
 app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(stats.router, prefix="/api", tags=["stats"])

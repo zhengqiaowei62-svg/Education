@@ -341,7 +341,80 @@ def retrieve(question: str, top_k: int = 5, search_mode: str = "hybrid") -> List
         channels.append(("semantic", _semantic(question)))
     if search_mode in {"hybrid", "region"}:
         channels.append(("region", _region(question)))
-    return _rrf(channels, top_k)
+    # 第一阶段：RRF 融合得到 top_k * 3 候选
+    rrf_pool = max(top_k * 3, 12)
+    fused = _rrf(channels, rrf_pool)
+    # 第二阶段：可选 Rerank（cross-score / MMR），输出最终 top_k
+    final = _rerank(question, fused, top_k=top_k)
+    return final
+
+
+# ----------- Rerank（向量重排 + MMR 多样性） -----------
+
+RERANK_LAMBDA = 0.7  # MMR 权重：相关性 vs 多样性
+
+
+def _rerank(question: str, candidates: list[dict], top_k: int) -> list[dict]:
+    """两步 Rerank：
+    1. 用 BGE 余弦计算 query↔candidate 的精排分（若 BGE 不可用则跳过此步）
+    2. MMR 选 top_k：兼顾相关性与多样性，避免连续 chunk 高度重复
+    """
+    if not candidates:
+        return []
+    # ----- 精排分 -----
+    fine_scores: list[float] = []
+    q_vec = _encode([question])
+    cand_vecs = _encode([c["text"] for c in candidates]) if q_vec is not None else None
+    if q_vec is not None and cand_vecs is not None and len(cand_vecs) == len(candidates):
+        try:
+            import numpy as np  # noqa: WPS433
+            sims = (cand_vecs @ q_vec[0].astype("float32"))
+            fine_scores = [float(x) for x in sims]
+        except Exception as exc:  # noqa: BLE001
+            print(f"[rag] rerank cosine failed: {exc}", flush=True)
+    if not fine_scores:
+        # 退化：用 RRF 后的 relevance_score 作为精排分
+        fine_scores = [float(c.get("relevance_score", 0.0)) for c in candidates]
+
+    # ----- MMR 多样性选择 -----
+    chosen: list[int] = []
+    available = list(range(len(candidates)))
+    # 第一名取相关性最高
+    first = max(available, key=lambda i: fine_scores[i])
+    chosen.append(first)
+    available.remove(first)
+
+    def _div(i: int) -> float:
+        # 与已选 chunk 文本的 token 重合度（无向量时用 Jaccard 替代）
+        if cand_vecs is not None and len(cand_vecs) == len(candidates):
+            try:
+                import numpy as np  # noqa: WPS433
+                vi = cand_vecs[i]
+                return float(max((vi @ cand_vecs[j]) for j in chosen))
+            except Exception:
+                pass
+        ti = set(tokens(candidates[i]["text"]))
+        return max(
+            (len(ti & set(tokens(candidates[j]["text"]))) / max(len(ti | set(tokens(candidates[j]["text"]))), 1))
+            for j in chosen
+        )
+
+    while available and len(chosen) < top_k:
+        scored = [
+            (i, RERANK_LAMBDA * fine_scores[i] - (1 - RERANK_LAMBDA) * _div(i))
+            for i in available
+        ]
+        next_i = max(scored, key=lambda x: x[1])[0]
+        chosen.append(next_i)
+        available.remove(next_i)
+
+    out = []
+    for rank, i in enumerate(chosen, 1):
+        c = dict(candidates[i])
+        c["rerank_score"] = round(fine_scores[i], 4)
+        c["relevance_score"] = round(min(1.0, 0.6 * fine_scores[i] + 0.4 * float(c.get("relevance_score", 0))), 4)
+        out.append(c)
+    return out
 
 
 # ----------- 生成 -----------

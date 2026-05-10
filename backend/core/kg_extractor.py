@@ -25,6 +25,7 @@ class ExtractedNode(BaseModel):
     definition: str = Field(default="", max_length=300)
     category: str = Field(default="核心概念")
     page: Optional[int] = None
+    confidence: float = Field(default=0.9, ge=0.0, le=1.0)
 
     @field_validator("category")
     @classmethod
@@ -66,7 +67,7 @@ USER_TEMPLATE = """请从下面的教材章节中抽取 5–15 个核心知识�
 【输出 schema】
 {{
   "nodes": [
-    {{"id": "n1", "name": "概念名", "definition": "20-60字的定义", "category": "核心概念|定理|方法|现象", "page": 35}}
+    {{"id": "n1", "name": "概念名", "definition": "20-60字的定义", "category": "核心概念|定理|方法|现象", "page": 35, "confidence": 0.95}}
   ],
   "edges": [
     {{"source": "n1", "target": "n2", "relation_type": "prerequisite|parallel|contains|applies_to", "description": "10-30字"}}
@@ -76,7 +77,7 @@ USER_TEMPLATE = """请从下面的教材章节中抽取 5–15 个核心知识�
 【few-shot 示例】
 输入章节："第二章 细胞的基本功能 …静息电位是细胞处于静息状态时膜内外的电位差…动作电位是细胞受到刺激后…"
 输出：
-{{"nodes":[{{"id":"n1","name":"静息电位","definition":"细胞静息时膜内外的电位差","category":"核心概念","page":33}},{{"id":"n2","name":"动作电位","definition":"细胞受刺激后膜电位的快速可逆倒转","category":"核心概念","page":35}}],"edges":[{{"source":"n1","target":"n2","relation_type":"prerequisite","description":"理解动作电位需先掌握静息电位"}}]}}
+{{"nodes":[{{"id":"n1","name":"静息电位","definition":"细胞静息时膜内外的电位差","category":"核心概念","page":33,"confidence":0.95}},{{"id":"n2","name":"动作电位","definition":"细胞受刺激后膜电位的快速可逆倒转","category":"核心概念","page":35,"confidence":0.92}}],"edges":[{{"source":"n1","target":"n2","relation_type":"prerequisite","description":"理解动作电位需先掌握静息电位"}}]}}
 
 【硬约束】
 - id 用 n1/n2/n3… 短编号
@@ -152,6 +153,7 @@ def _to_graph(data: dict, textbook_id: str, chapter: Chapter) -> KnowledgeGraph:
                 page=int(raw.get("page", chapter.page_start) or chapter.page_start),
                 textbook_id=textbook_id,
                 frequency=1,
+                confidence=float(raw.get("confidence", 0.9)),
             ))
         except Exception as e:
             print(f"[extractor] bad node: {e}")

@@ -77,6 +77,26 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
 }
 
 
+# ---------- Ollama 本地部署支持（OpenAI 兼容） ----------
+# 用户在 .env 中设置 LLM_PROVIDER=ollama 即可把 extractor/judge 全部切换到本地 Ollama。
+#   OLLAMA_BASE_URL  默认 http://localhost:11434/v1
+#   OLLAMA_MODEL     默认 qwen2.5:7b
+# 也可单独覆盖 EXTRACTOR_BASE_URL / JUDGE_BASE_URL 走 Ollama，其它继续走云端。
+def _maybe_use_ollama(role: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if provider != "ollama":
+        return cfg
+    cfg = dict(cfg)
+    cfg["api_key"] = cfg.get("api_key") or os.getenv("OLLAMA_API_KEY") or "ollama"  # 任意非空字符串
+    cfg["base_url"] = os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1"
+    cfg["model"] = (
+        os.getenv(f"{role.upper()}_MODEL")
+        or os.getenv("OLLAMA_MODEL")
+        or "qwen2.5:7b"
+    )
+    return cfg
+
+
 def _role_config(role: str) -> Dict[str, str | None]:
     cfg = DEFAULTS.get(role) or DEFAULTS["judge"]
     api_key = os.getenv(cfg["key_env"]) or ""
@@ -87,10 +107,66 @@ def _role_config(role: str) -> Dict[str, str | None]:
                 break
     base_url = os.getenv(cfg["base_env"]) or cfg["base_default"]
     model = os.getenv(cfg["model_env"]) or os.getenv("LLM_MODEL") or cfg["model_default"]
-    return {"api_key": api_key, "base_url": base_url, "model": model}
+    return _maybe_use_ollama(role, {"api_key": api_key, "base_url": base_url, "model": model})
 
 
 _client_cache: Dict[str, Any] = {}
+
+
+# ---------- Token 用量统计（全进程，可被 /api/stats/tokens 读取） ----------
+TOKEN_USAGE: Dict[str, Dict[str, int]] = {
+    "extractor": {"prompt": 0, "completion": 0, "calls": 0},
+    "judge":     {"prompt": 0, "completion": 0, "calls": 0},
+    "vision":    {"prompt": 0, "completion": 0, "calls": 0},
+}
+
+
+def _approx_tokens(text: str) -> int:
+    """无 tokenizer 时的近似估算：中文按字符、英文按词 0.75 比例。"""
+    if not text:
+        return 0
+    cn = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    en = max(0, len(text) - cn)
+    return cn + max(1, int(en / 4))
+
+
+def _record_usage(role: str, prompt_text: str, completion_text: str, usage_obj=None) -> None:
+    """优先使用 SDK 返回的 usage，缺失时按字符近似。"""
+    bucket = TOKEN_USAGE.setdefault(role, {"prompt": 0, "completion": 0, "calls": 0})
+    bucket["calls"] += 1
+    p = c = 0
+    try:
+        if usage_obj is not None:
+            p = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
+            c = int(getattr(usage_obj, "completion_tokens", 0) or 0)
+    except Exception:
+        pass
+    if not p:
+        p = _approx_tokens(prompt_text)
+    if not c:
+        c = _approx_tokens(completion_text)
+    bucket["prompt"] += p
+    bucket["completion"] += c
+
+
+def get_token_usage() -> Dict[str, Any]:
+    total_prompt = sum(b["prompt"] for b in TOKEN_USAGE.values())
+    total_completion = sum(b["completion"] for b in TOKEN_USAGE.values())
+    total_calls = sum(b["calls"] for b in TOKEN_USAGE.values())
+    return {
+        "by_role": TOKEN_USAGE,
+        "total": {
+            "prompt": total_prompt,
+            "completion": total_completion,
+            "tokens": total_prompt + total_completion,
+            "calls": total_calls,
+        },
+    }
+
+
+def reset_token_usage() -> None:
+    for bucket in TOKEN_USAGE.values():
+        bucket["prompt"] = bucket["completion"] = bucket["calls"] = 0
 
 
 def _client(role: str):
@@ -123,6 +199,10 @@ def model_for(role: str) -> str:
 def _is_quota_error(message: str) -> bool:
     lower = message.lower()
     return any(k in lower for k in ("429", "insufficient_quota", "exceeded your current quota", "billing"))
+
+
+def _msgs_to_text(msgs: list) -> str:
+    return "\n".join(str(m.get("content", "")) for m in (msgs or []))
 
 
 # ---------- 文本后处理 ----------
@@ -204,10 +284,14 @@ def chat(prompt: str, system: str = "", role: str = "judge",
                             last_log = time.time()
                 txt = _strip_think("".join(parts))
                 print(f"[llm:{role}] ← stream done in {time.time()-t_start:.1f}s, {len(txt)} chars", flush=True)
+                # 流式接口通常不返回 usage，按近似计入
+                _record_usage(role, _msgs_to_text(msgs), txt, None)
                 return txt
             else:
                 resp = _client(role).chat.completions.create(**kwargs)
-                return _strip_think(resp.choices[0].message.content or "")
+                content = _strip_think(resp.choices[0].message.content or "")
+                _record_usage(role, _msgs_to_text(msgs), content, getattr(resp, "usage", None))
+                return content
         except Exception as e:
             msg = str(e)
             last_err = e
