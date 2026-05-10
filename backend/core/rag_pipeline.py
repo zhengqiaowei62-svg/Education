@@ -504,6 +504,10 @@ def query(question: str, top_k: int = 5, search_mode: str = "hybrid",
     try:
         answer = chat(prompt, system=ANSWER_SYSTEM, role="judge",
                       temperature=0.2, max_tokens=500)
+        # 质量兜底：若 LLM 返回过短/无意义，降级为检索摘要
+        if not answer or len(answer.strip()) < 10:
+            print(f"[rag] answer too short ({len(answer.strip()) if answer else 0} chars), fallback to extractive")
+            answer = _extractive_answer(hits)
     except Exception as e:
         print(f"[rag] generation fallback: {e}")
         answer = _extractive_answer(hits)

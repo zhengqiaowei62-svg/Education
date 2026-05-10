@@ -159,6 +159,14 @@ const doUpload = async (files) => {
     uploadStatus.value = result.files || []
     await refreshList()
     log(`完成上传解析：${files.length} 个文件`)
+    // 自动构建 RAG 索引，确保上传后立即可用问答功能
+    const ids = textbooks.value.map(t => t.textbook_id)
+    if (ids.length) {
+      log(`自动构建索引…`)
+      const idxResult = await buildIndex(ids)
+      await refreshIndex()
+      log(`索引就绪：${idxResult.indexed_chunks} 个文本块`)
+    }
   } finally {
     uploading.value = false
   }
@@ -210,6 +218,16 @@ const runIntegrate = async () => {
 const onAsk = async () => {
   const text = question.value.trim()
   if (!text || asking.value) return
+  // 若索引未就绪，先尝试自动构建
+  if (!indexState.value.ready && textbooks.value.length) {
+    asking.value = true
+    try {
+      const ids = textbooks.value.map(t => t.textbook_id)
+      await buildIndex(ids)
+      await refreshIndex()
+    } catch {}
+    asking.value = false
+  }
   messages.value.push({ role: 'user', text })
   sessions.value[0].count += 1
   question.value = ''
@@ -329,6 +347,15 @@ onMounted(async () => {
   window.addEventListener('resize', resizeGraph)
   try { await refreshList() } catch {}
   try { await refreshIndex() } catch {}
+  // 若有教材但 RAG 索引为空，自动构建
+  if (textbooks.value.length && !indexState.value.ready) {
+    const ids = textbooks.value.map(t => t.textbook_id)
+    try {
+      await buildIndex(ids)
+      await refreshIndex()
+      log(`已自动建立 RAG 索引`)
+    } catch {}
+  }
   await loadGraph()
 })
 

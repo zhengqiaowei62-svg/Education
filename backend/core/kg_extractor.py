@@ -92,7 +92,7 @@ USER_TEMPLATE = """请从下面的教材章节中抽取 5–15 个核心知识�
 """
 
 
-def _trim(text: str, limit: int = 4000) -> str:
+def _trim(text: str, limit: int = 2500) -> str:
     if len(text) <= limit:
         return text
     head = text[: int(limit * 0.6)]
@@ -106,7 +106,7 @@ def extract_from_chapter(textbook_id: str, chapter) -> KnowledgeGraph:
 
     user_prompt = USER_TEMPLATE.format(
         title=chapter.title,
-        content=_trim(chapter.content, 4000),
+        content=_trim(chapter.content, 2500),
     )
 
     messages = [
@@ -178,9 +178,9 @@ def _to_graph(data: dict, textbook_id: str, chapter: Chapter) -> KnowledgeGraph:
     return KnowledgeGraph(textbook_id=textbook_id, nodes=nodes, edges=edges)
 
 
-def extract_textbook(textbook, max_workers: int = 4) -> KnowledgeGraph:
-    """Map-Reduce 并行抽取：多章节并发处理"""
-    MAX_CHAPTERS = 12
+def extract_textbook(textbook, max_workers: int = 2) -> KnowledgeGraph:
+    """Map-Reduce 并行抽取：多章节并发处理（默认2并发，避免LLM端点过载）"""
+    MAX_CHAPTERS = 6
     chapters = [ch for ch in textbook.chapters[:MAX_CHAPTERS] if ch.char_count >= 200]
 
     all_nodes = []
