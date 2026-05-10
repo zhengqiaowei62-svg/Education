@@ -51,7 +51,7 @@ import { computed } from 'vue'
 const props = defineProps({
   kind: { type: String, default: 'dna' }, // dna | cell | mol
   size: { type: [Number, String], default: 120 },
-  color: { type: String, default: '#0ea5e9' },
+  color: { type: String, default: '#6f9584' },
   extraClass: { type: String, default: '' },
 })
 

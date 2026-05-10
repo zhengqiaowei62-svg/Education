@@ -25,8 +25,9 @@ export const getSingleGraph = (id) => http.get(`/graph/${id}`).then(r => r.data)
 export const buildIndex = (textbook_ids) =>
   http.post('/rag/index', { textbook_ids }).then(r => r.data)
 
-export const ragQuery = (question, top_k = 5) =>
-  http.post('/rag/query', { question, top_k }).then(r => r.data)
+export const ragQuery = (question, top_k = 5, search_mode = 'hybrid', history = []) =>
+  http.post('/rag/query', { question, top_k, search_mode, history }).then(r => r.data)
 
 export const ragStatus = () => http.get('/rag/status').then(r => r.data)
+export const getRagSource = (chunkId) => http.get(`/rag/source/${chunkId}`).then(r => r.data)
 export const health = () => http.get('/health').then(r => r.data)

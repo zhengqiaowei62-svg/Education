@@ -1,0 +1,21 @@
+# 构建上下文裁剪：避免把数据/缓存/虚拟环境塞进镜像
+.git
+.gitignore
+.venv
+venv
+node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+frontend/dist
+frontend/node_modules
+backend/storage/data
+backend/storage/uploads
+backend/storage/cache
+data/textbooks
+report
+tests
+docs
+*.log
+.env
+.env.local

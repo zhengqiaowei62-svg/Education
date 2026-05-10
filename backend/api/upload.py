@@ -37,7 +37,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 filename=f.filename or "",
                 size=len(data), format=ext, status="done",
                 textbook_id=textbook_id,
-                message=f"{len(tb.chapters)} 章 / {tb.total_chars} 字",
+                message=f"{len(tb.chapters)} 章 / {tb.total_chars} 字 / {len(tb.blocks)} 区块",
             ))
         except Exception as e:
             results.append(UploadFileStatus(
@@ -59,6 +59,7 @@ def list_textbooks():
             filename=tb.filename, title=tb.title,
             total_pages=tb.total_pages, total_chars=tb.total_chars,
             chapters=[c.model_copy(update={"content": ""}) for c in tb.chapters],
+            blocks=[],
         ))
     return light
 

@@ -1,103 +1,194 @@
 <script setup>
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import BioDecor from '../components/BioDecor.vue'
 
 const emit = defineEmits(['start'])
+const canvasRef = ref(null)
+let rafId = 0
+let cleanupResize = null
+let lastWheelAt = 0
+
+const start = () => emit('start')
+
+const onWheel = (event) => {
+  if (event.deltaY < 18) return
+  const now = Date.now()
+  if (now - lastWheelAt < 900) return
+  lastWheelAt = now
+  start()
+}
+
+onMounted(() => {
+  const canvas = canvasRef.value
+  const ctx = canvas?.getContext('2d')
+  if (!canvas || !ctx) return
+
+  const particles = Array.from({ length: 84 }, (_, i) => ({
+    x: Math.random(),
+    y: Math.random(),
+    r: 1.2 + Math.random() * 3.8,
+    speed: 0.18 + Math.random() * 0.36,
+    phase: Math.random() * Math.PI * 2,
+    hue: i % 3,
+  }))
+
+  const resize = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    canvas.width = Math.floor(canvas.clientWidth * dpr)
+    canvas.height = Math.floor(canvas.clientHeight * dpr)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  }
+
+  const drawRibbon = (time, offset, color, alpha, width) => {
+    const w = canvas.clientWidth
+    const h = canvas.clientHeight
+    ctx.beginPath()
+    for (let x = -80; x <= w + 80; x += 18) {
+      const t = x / w
+      const y =
+        h * (0.34 + offset) +
+        Math.sin(t * 7.2 + time * 0.00075 + offset * 8) * 44 +
+        Math.cos(t * 13.5 - time * 0.00042) * 18
+      if (x === -80) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.strokeStyle = color
+    ctx.globalAlpha = alpha
+    ctx.lineWidth = width
+    ctx.lineCap = 'round'
+    ctx.stroke()
+  }
+
+  const tick = (time) => {
+    const w = canvas.clientWidth
+    const h = canvas.clientHeight
+    ctx.clearRect(0, 0, w, h)
+
+    const bg = ctx.createLinearGradient(0, 0, w, h)
+    bg.addColorStop(0, '#ffffff')
+    bg.addColorStop(0.55, '#fbfdfb')
+    bg.addColorStop(1, '#f4f8f6')
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, w, h)
+
+    drawRibbon(time, -0.1, '#dfeee7', 0.82, 42)
+    drawRibbon(time, 0.07, '#edf6f1', 0.95, 64)
+    drawRibbon(time, 0.22, '#d8e8e1', 0.54, 28)
+
+    particles.forEach((p, index) => {
+      const drift = Math.sin(time * 0.00055 + p.phase) * 0.026
+      p.y -= p.speed / h
+      p.x += drift / w
+      if (p.y < -0.08) {
+        p.y = 1.08
+        p.x = Math.random()
+      }
+      const x = ((p.x + 1) % 1) * w
+      const y = p.y * h
+      ctx.beginPath()
+      ctx.fillStyle = p.hue === 0 ? '#dbeae2' : p.hue === 1 ? '#e8f1ec' : '#d4e7df'
+      ctx.globalAlpha = 0.32 + Math.sin(time * 0.001 + index) * 0.08
+      ctx.arc(x, y, p.r, 0, Math.PI * 2)
+      ctx.fill()
+    })
+
+    ctx.globalAlpha = 1
+    rafId = requestAnimationFrame(tick)
+  }
+
+  resize()
+  window.addEventListener('resize', resize)
+  cleanupResize = () => window.removeEventListener('resize', resize)
+  rafId = requestAnimationFrame(tick)
+})
+
+onBeforeUnmount(() => {
+  if (rafId) cancelAnimationFrame(rafId)
+  cleanupResize?.()
+})
 </script>
 
 <template>
-  <section class="relative h-full w-full bg-grid overflow-hidden">
-    <!-- 顶栏 -->
-    <header class="absolute top-0 left-0 right-0 px-10 py-5 flex items-center justify-between z-20">
-      <div class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500 to-teal-500 grid place-items-center text-white text-[11px] font-bold">K</div>
-        <div class="font-semibold tracking-wide text-slate-800">KnowLab</div>
-        <span class="tag ml-2">学科知识整合智能体</span>
+  <section class="landing-scene" @wheel.passive="onWheel">
+    <canvas ref="canvasRef" class="landing-flow" aria-hidden="true"></canvas>
+
+    <header class="landing-topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark">K</div>
+        <div>
+          <div class="brand-name">KnowLab</div>
+          <div class="brand-caption">医学与生物教材知识整合</div>
+        </div>
       </div>
-      <div class="text-xs text-slate-400 hidden md:block">浙大极速黑客松 · 双 Agent 工作流</div>
+      <div class="topbar-meta">
+        <span>双 Agent 抽取与融合</span>
+        <span>RAG 溯源问答</span>
+      </div>
     </header>
 
-    <!-- 装饰：DNA / 细胞 / 分子 -->
-    <BioDecor kind="dna" :size="380" color="#0ea5e9"
-              extraClass="absolute -left-16 top-24 opacity-[0.10] drift-slow" />
-    <BioDecor kind="cell" :size="500" color="#14b8a6"
-              extraClass="absolute -right-32 -top-10 opacity-[0.08] spin-slow" />
-    <BioDecor kind="mol" :size="220" color="#0ea5e9"
-              extraClass="absolute right-24 bottom-16 opacity-[0.13] drift" />
-    <BioDecor kind="cell" :size="160" color="#0ea5e9"
-              extraClass="absolute left-1/3 bottom-24 opacity-[0.10] drift-slow" />
+    <BioDecor
+      kind="dna"
+      :size="420"
+      color="#7aa391"
+      extraClass="absolute -left-24 top-24 opacity-[0.10] drift-slow"
+    />
+    <BioDecor
+      kind="cell"
+      :size="520"
+      color="#95b6a6"
+      extraClass="absolute -right-32 top-8 opacity-[0.09] spin-slow"
+    />
+    <BioDecor
+      kind="mol"
+      :size="220"
+      color="#6f9e8c"
+      extraClass="absolute right-20 bottom-20 opacity-[0.13] drift"
+    />
 
-    <!-- 主内容 -->
-    <div class="relative z-10 h-full flex flex-col items-center justify-center px-8">
-      <div class="max-w-3xl text-center">
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-[12px] text-slate-500 mb-6 shadow-sm">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          双 Agent 协作 · Extractor + Aligner
-        </div>
+    <main class="landing-content">
+      <div class="landing-kicker">
+        <span class="status-dot"></span>
+        多教材理解 · 知识图谱 · 医学 RAG
+      </div>
 
-        <h1 class="text-[56px] leading-[1.1] font-semibold tracking-tight">
-          把 <span class="gradient-text">7 本教材</span><br/>
-          凝炼成一张可生长的<span class="gradient-text">知识图谱</span>。
-        </h1>
+      <h1 class="landing-title">
+        把分散教材整理成
+        <span>可追溯的学习知识网络</span>
+      </h1>
 
-        <p class="mt-6 text-slate-500 text-[15px] leading-relaxed max-w-xl mx-auto">
-          上传多本医学/生物学教材，系统自动解析章节、抽取知识点、跨教材去重融合，
-          并提供带原文溯源的 RAG 精准问答。
-        </p>
+      <p class="landing-copy">
+        面向医学与生物学习场景，上传教材后自动解析章节、抽取概念关系、融合重复知识点，并在对话中保留来源证据。
+      </p>
 
-        <div class="mt-10 flex items-center justify-center gap-3">
-          <button class="btn-primary group inline-flex items-center gap-2"
-                  @click="emit('start')">
-            进入工作台
-            <svg class="w-4 h-4 transition-transform group-hover:translate-x-0.5"
-                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14M13 5l7 7-7 7"/>
-            </svg>
-          </button>
-          <a href="https://github.com" target="_blank" class="btn-ghost text-sm">查看源码</a>
-        </div>
+      <div class="landing-actions">
+        <button class="btn-primary btn-large" @click="start">
+          进入工作台
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 12h14M13 5l7 7-7 7" />
+          </svg>
+        </button>
+        <button class="btn-quiet" @click="start">向下滑动也可进入</button>
+      </div>
+    </main>
 
-        <!-- 三个能力卡 -->
-        <div class="mt-20 grid grid-cols-3 gap-4 max-w-3xl mx-auto">
-          <div v-for="f in features" :key="f.t"
-               class="card p-5 text-left hover:shadow-md transition-shadow">
-            <div class="w-9 h-9 rounded-lg bg-sky-50 grid place-items-center text-sky-600 mb-3">
-              <component :is="f.icon" />
-            </div>
-            <div class="text-sm font-semibold text-slate-800">{{ f.t }}</div>
-            <div class="mt-1 text-xs text-slate-500 leading-relaxed">{{ f.d }}</div>
-          </div>
-        </div>
+    <div class="landing-preview" aria-hidden="true">
+      <div class="preview-card source-mini">
+        <span class="mini-label">Sources</span>
+        <strong>神经生理学</strong>
+        <small>32 章 · 1840 chunks</small>
+      </div>
+      <div class="preview-card chat-mini">
+        <span class="mini-label">RAG</span>
+        <p>动作电位的触发机制是什么？</p>
+      </div>
+      <div class="preview-card graph-mini">
+        <span></span><span></span><span></span><i></i><i></i>
       </div>
     </div>
 
-    <!-- 底部脚注 -->
-    <div class="absolute bottom-5 left-0 right-0 text-center text-[11px] text-slate-400">
-      ⚕ 医学/生物学教学场景 · 白色简约 · 多教材整合
+    <div class="scroll-cue">
+      <span></span>
+      滑动进入
     </div>
   </section>
 </template>
-
-<script>
-import { h } from 'vue'
-const Icon = (path) => () => h('svg', {
-  width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none',
-  stroke: 'currentColor', 'stroke-width': 2,
-  'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-}, [h('path', { d: path })])
-
-export default {
-  data() {
-    return {
-      features: [
-        { t: '解析 · 章节级', d: 'PDF/MD/TXT/DOCX 自动识别章节与页码',
-          icon: Icon('M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8') },
-        { t: '抽取 · Agent A', d: 'LLM 结构化输出节点 + 关系（JSON 严格约束）',
-          icon: Icon('M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12') },
-        { t: '融合 · Agent B', d: '相似度初筛 + LLM 裁决 merge/keep/remove',
-          icon: Icon('M22 11.08V12a10 10 0 1 1-5.93-9.14 M22 4L12 14.01l-3-3') },
-      ],
-    }
-  },
-}
-</script>

@@ -9,7 +9,7 @@ import re
 import io
 from typing import List
 
-from backend.models.schemas import Textbook, Chapter
+from backend.models.schemas import Textbook, Chapter, SourceBlock
 
 CHAPTER_RE = re.compile(
     r"^\s*(?:第\s*[一二三四五六七八九十百零0-9]+\s*[章节]|"
@@ -49,19 +49,72 @@ def parse_pdf(data: bytes, filename: str, textbook_id: str) -> Textbook:
     import fitz
     doc = fitz.open(stream=data, filetype="pdf")
     pages: List[tuple[int, str]] = []
+    blocks: list[SourceBlock] = []
     for i, page in enumerate(doc, start=1):
-        text = page.get_text("text") or ""
+        text_blocks: list[str] = []
+        page_dict = page.get_text("dict") or {}
+        for block_index, block in enumerate(page_dict.get("blocks", []) or []):
+            bbox = [round(float(v), 2) for v in block.get("bbox", [])[:4]]
+            block_type = int(block.get("type", 0))
+            block_id = f"{textbook_id}_p{i:04d}_b{block_index:03d}"
+            if block_type == 0:
+                text = _text_from_pdf_block(block)
+                if not text.strip():
+                    continue
+                text_blocks.append(text)
+                blocks.append(SourceBlock(
+                    block_id=block_id,
+                    kind="text",
+                    page=i,
+                    bbox=bbox,
+                    text=text,
+                ))
+            elif block_type == 1:
+                blocks.append(SourceBlock(
+                    block_id=block_id,
+                    kind="image",
+                    page=i,
+                    bbox=bbox,
+                    text=f"PDF 第 {i} 页图像/图表区域",
+                    image_ext=block.get("ext"),
+                ))
+        text = "\n".join(text_blocks) if text_blocks else (page.get_text("text") or "")
         lines = [ln for ln in text.split("\n") if len(ln.strip()) > 1]
         pages.append((i, "\n".join(lines)))
     full_text = "\n".join(t for _, t in pages)
     chapters = _split_chapters_with_pages(pages)
+    _attach_blocks_to_chapters(blocks, chapters)
     return Textbook(
         textbook_id=textbook_id, filename=filename,
         title=filename.rsplit(".", 1)[0],
         total_pages=len(pages),
         total_chars=len(full_text),
         chapters=chapters,
+        blocks=blocks,
     )
+
+
+def _text_from_pdf_block(block: dict) -> str:
+    lines: list[str] = []
+    for line in block.get("lines", []) or []:
+        spans = line.get("spans", []) or []
+        line_text = "".join(str(span.get("text", "")) for span in spans).strip()
+        if line_text:
+            lines.append(line_text)
+    return "\n".join(lines)
+
+
+def _attach_blocks_to_chapters(blocks: list[SourceBlock], chapters: list[Chapter]) -> None:
+    if not chapters:
+        return
+    for block in blocks:
+        chapter = next(
+            (ch for ch in chapters if ch.page_start <= block.page <= ch.page_end),
+            chapters[0],
+        )
+        block.chapter_id = chapter.chapter_id
+        block.chapter = chapter.title
+        chapter.block_ids.append(block.block_id)
 
 
 def _split_chapters_with_pages(pages: List[tuple[int, str]]) -> List[Chapter]:
@@ -126,9 +179,24 @@ def _from_text(text: str, filename: str, textbook_id: str) -> Textbook:
                 page_start=1, page_end=1,
                 content=body, char_count=len(body),
             ))
+    blocks = [
+        SourceBlock(
+            block_id=f"{textbook_id}_{ch.chapter_id}_b000",
+            kind="text",
+            page=ch.page_start or 1,
+            bbox=[],
+            text=ch.content,
+            chapter_id=ch.chapter_id,
+            chapter=ch.title,
+        )
+        for ch in chapters
+    ]
+    for ch, block in zip(chapters, blocks):
+        ch.block_ids = [block.block_id]
     return Textbook(
         textbook_id=textbook_id, filename=filename,
         title=filename.rsplit(".", 1)[0],
         total_pages=1, total_chars=len(text),
         chapters=chapters,
+        blocks=blocks,
     )

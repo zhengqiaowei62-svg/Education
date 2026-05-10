@@ -8,6 +8,17 @@ from pydantic import BaseModel, Field
 
 # -------------------- 教材解析 --------------------
 
+class SourceBlock(BaseModel):
+    block_id: str
+    kind: Literal["text", "image", "table", "figure"] = "text"
+    page: int = 1
+    bbox: List[float] = []
+    text: str = ""
+    chapter_id: str = ""
+    chapter: str = ""
+    image_ext: Optional[str] = None
+
+
 class Chapter(BaseModel):
     chapter_id: str
     title: str
@@ -15,6 +26,7 @@ class Chapter(BaseModel):
     page_end: int = 0
     content: str = ""
     char_count: int = 0
+    block_ids: List[str] = []
 
 
 class Textbook(BaseModel):
@@ -24,6 +36,7 @@ class Textbook(BaseModel):
     total_pages: int = 0
     total_chars: int = 0
     chapters: List[Chapter] = []
+    blocks: List[SourceBlock] = []
 
 
 class UploadFileStatus(BaseModel):
@@ -50,6 +63,9 @@ class KGNode(BaseModel):
     page: int = 0
     textbook_id: str = ""
     frequency: int = 1  # 跨教材出现次数（融合后）
+    bbox: List[float] = []
+    source_block_id: Optional[str] = None
+    source_url: Optional[str] = None
 
 
 class KGEdge(BaseModel):
@@ -113,18 +129,49 @@ class RagStatus(BaseModel):
 
 
 class Citation(BaseModel):
+    textbook_id: str = ""
     textbook: str
     chapter: str
     page: int
+    page_end: int = 0
     relevance_score: float
+    chunk_id: str = ""
+    bbox: List[float] = []
+    block_ids: List[str] = []
+    quote: str = ""
+    source_url: str = ""
+    retrieval_mode: str = "hybrid"
 
 
 class RagQueryRequest(BaseModel):
     question: str = Field(..., min_length=1)
     top_k: int = 5
+    search_mode: Literal["hybrid", "term", "semantic", "region"] = "hybrid"
+    # 多轮对话历史：[{role: 'user'|'assistant', content: '...'}]
+    history: List[dict] = []
 
 
 class RagQueryResponse(BaseModel):
     answer: str
     citations: List[Citation]
     source_chunks: List[str]
+
+
+# -------------------- Human-in-the-Loop 图谱修改 --------------------
+
+class GraphModifyRequest(BaseModel):
+    """教师图谱修改请求"""
+    instruction: str  # 教师的自然语言指令
+    node_ids: Optional[List[str]] = None  # 可选：指定操作的节点ID
+
+
+class ModificationRecord(BaseModel):
+    """图谱修改记录"""
+    mod_id: str
+    action: str  # split, rename, delete, merge, add_edge, remove_edge
+    target_nodes: List[str]
+    before: dict  # 修改前状态
+    after: dict   # 修改后状态
+    teacher_instruction: str
+    timestamp: str
+    confidence: float = 1.0

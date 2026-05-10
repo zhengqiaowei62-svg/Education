@@ -22,7 +22,8 @@ from backend.utils.llm import chat_json, llm_available, text_similarity
 
 JUDGE_SYSTEM = """你是一名医学/生物学教学内容整合专家（Aligner Agent）。
 你的职责：对来自不同教材、疑似描述同一概念的多个知识点做出整合裁决。
-严禁输出任何解释、寒暄、markdown。仅输出 JSON 对象。"""
+严禁输出任何解释、寒暄、markdown、<think> 思考链。仅输出 JSON 对象。
+/no_think"""
 
 
 JUDGE_TEMPLATE = """以下是来自不同教材的若干知识点，疑似描述"同一个概念"。请裁决并仅输出如下 JSON：
@@ -109,7 +110,7 @@ def _judge_cluster(nodes: List[KGNode]) -> dict:
 
     prompt = JUDGE_TEMPLATE.format(candidates=_format_candidates(nodes))
     data = chat_json(prompt, system=JUDGE_SYSTEM, role="judge", default=None,
-                     temperature=0.1, max_tokens=400)
+                     temperature=0.1, max_tokens=2000)
     if not isinstance(data, dict):
         data = {"action": "keep", "canonical_name": nodes[0].name,
                 "canonical_definition": nodes[0].definition,

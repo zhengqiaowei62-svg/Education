@@ -29,9 +29,22 @@ def build_index(req: RagIndexRequest):
 
 @router.post("/query", response_model=RagQueryResponse)
 def query(req: RagQueryRequest):
-    answer, citations, source_chunks = rag_pipeline.query(req.question, req.top_k)
+    answer, citations, source_chunks = rag_pipeline.query(
+        req.question,
+        req.top_k,
+        search_mode=req.search_mode,
+        history=req.history,
+    )
     return RagQueryResponse(
         answer=answer,
         citations=citations,
         source_chunks=source_chunks,
     )
+
+
+@router.get("/source/{chunk_id}")
+def source(chunk_id: str):
+    chunk = state.CHUNK_BY_ID.get(chunk_id)
+    if not chunk:
+        return {"found": False, "chunk_id": chunk_id}
+    return {"found": True, **{k: v for k, v in chunk.items() if k != "vector"}}
