@@ -62,7 +62,7 @@ SYSTEM_PROMPT = """你是一名学科教材知识图谱构建专家（Extractor 
 /no_think"""
 
 
-USER_TEMPLATE = """请从下面的教材章节中抽取 5–15 个核心知识点（概念/定理/方法/现象），并识别它们之间的关系。
+USER_TEMPLATE = """请从下面的教材章节中抽取 5–15 个核心知识点（概念/定理/方法/现象），并充分识别它们之间的关系。
 
 【输出 schema】
 {{
@@ -74,16 +74,27 @@ USER_TEMPLATE = """请从下面的教材章节中抽取 5–15 个核心知识�
   ]
 }}
 
+【关系边要求 — 非常重要】
+- 每个节点至少与1个其他节点建立关系边，不允许出现孤立节点
+- edges 数量应不少于 nodes 数量的 80%（例如10个节点至少8条边）
+- 关系类型选择指南：
+  · prerequisite（前置依赖）：概念A是理解概念B的前提
+  · contains（包含）：大概念包含子概念，章节层级关系
+  · parallel（并列）：同层级、同类别的概念
+  · applies_to（应用于）：方法/定理应用到具体场景
+- 优先识别 prerequisite 和 contains 关系，其次 applies_to，最后 parallel
+
 【few-shot 示例】
-输入章节："第二章 细胞的基本功能 …静息电位是细胞处于静息状态时膜内外的电位差…动作电位是细胞受到刺激后…"
+输入章节："第二章 细胞的基本功能 …静息电位是细胞处于静息状态时膜内外的电位差…动作电位是细胞受到刺激后…钠钾泵维持浓度梯度…阈电位是触发动作电位的临界值…"
 输出：
-{{"nodes":[{{"id":"n1","name":"静息电位","definition":"细胞静息时膜内外的电位差","category":"核心概念","page":33,"confidence":0.95}},{{"id":"n2","name":"动作电位","definition":"细胞受刺激后膜电位的快速可逆倒转","category":"核心概念","page":35,"confidence":0.92}}],"edges":[{{"source":"n1","target":"n2","relation_type":"prerequisite","description":"理解动作电位需先掌握静息电位"}}]}}
+{{"nodes":[{{"id":"n1","name":"细胞膜电位","definition":"细胞膜内外的电位差总称","category":"核心概念","page":32,"confidence":0.90}},{{"id":"n2","name":"静息电位","definition":"细胞静息时膜内外的电位差","category":"核心概念","page":33,"confidence":0.95}},{{"id":"n3","name":"动作电位","definition":"细胞受刺激后膜电位的快速可逆倒转","category":"核心概念","page":35,"confidence":0.92}},{{"id":"n4","name":"钠钾泵","definition":"主动转运Na+和K+维持浓度梯度的膜蛋白","category":"方法","page":34,"confidence":0.93}},{{"id":"n5","name":"阈电位","definition":"触发动作电位的临界去极化电位值","category":"核心概念","page":36,"confidence":0.91}}],"edges":[{{"source":"n1","target":"n2","relation_type":"contains","description":"静息电位是膜电位的一种形式"}},{{"source":"n1","target":"n3","relation_type":"contains","description":"动作电位是膜电位的一种形式"}},{{"source":"n2","target":"n3","relation_type":"prerequisite","description":"理解动作电位需先掌握静息电位"}},{{"source":"n4","target":"n2","relation_type":"prerequisite","description":"钠钾泵维持静息电位所需的离子梯度"}},{{"source":"n5","target":"n3","relation_type":"prerequisite","description":"达到阈电位才能触发动作电位"}}]}}
 
 【硬约束】
 - id 用 n1/n2/n3… 短编号
 - relation_type 只能取 prerequisite / parallel / contains / applies_to
 - definition 必须基于章节原文，不要编造
 - 仅输出 JSON 对象，不要任何其它字符
+- edges 数量不得少于 nodes 数量减1（确保图连通性）
 
 【章节标题】{title}
 
@@ -178,6 +189,125 @@ def _to_graph(data: dict, textbook_id: str, chapter: Chapter) -> KnowledgeGraph:
     return KnowledgeGraph(textbook_id=textbook_id, nodes=nodes, edges=edges)
 
 
+def _auto_connect_isolated(nodes: List[KGNode], edges: List[KGEdge]) -> List[KGEdge]:
+    """为孤立节点自动补充边关系（兜底方案）。
+
+    只处理完全孤立的节点（没有任何边连接），将其与同章节已连接的节点建立 parallel 关系。
+    """
+    if not nodes or not edges:
+        # 如果完全没有边，用链式连接同章节节点
+        if not edges and len(nodes) > 1:
+            new_edges = []
+            chapter_groups: dict[str, List[KGNode]] = {}
+            for n in nodes:
+                chapter_groups.setdefault(n.chapter, []).append(n)
+            for chapter_nodes in chapter_groups.values():
+                for i in range(len(chapter_nodes) - 1):
+                    new_edges.append(KGEdge(
+                        source=chapter_nodes[i].id,
+                        target=chapter_nodes[i + 1].id,
+                        relation_type="parallel",
+                        description="同章节概念关联",
+                    ))
+            return new_edges
+        return edges
+
+    # 找出已连接的节点
+    connected_ids = set()
+    for e in edges:
+        connected_ids.add(e.source)
+        connected_ids.add(e.target)
+
+    # 找出孤立节点
+    node_ids = {n.id for n in nodes}
+    isolated_ids = node_ids - connected_ids
+
+    if not isolated_ids:
+        return edges
+
+    new_edges = list(edges)
+    for iso_id in isolated_ids:
+        iso_node = next((n for n in nodes if n.id == iso_id), None)
+        if not iso_node:
+            continue
+
+        # 找同章节中已连接的节点
+        same_chapter_connected = [
+            n for n in nodes
+            if n.chapter == iso_node.chapter and n.id != iso_id and n.id in connected_ids
+        ]
+        if same_chapter_connected:
+            target = same_chapter_connected[0]
+            new_edges.append(KGEdge(
+                source=iso_id,
+                target=target.id,
+                relation_type="parallel",
+                description="同章节概念关联",
+            ))
+        else:
+            # 同章节都是孤立的，连接到同章节第一个非自身节点
+            same_chapter_any = [
+                n for n in nodes
+                if n.chapter == iso_node.chapter and n.id != iso_id
+            ]
+            if same_chapter_any:
+                target = same_chapter_any[0]
+                new_edges.append(KGEdge(
+                    source=iso_id,
+                    target=target.id,
+                    relation_type="parallel",
+                    description="同章节概念关联",
+                ))
+
+    print(f"[AutoConnect] 补充了 {len(new_edges) - len(edges)} 条边（孤立节点: {len(isolated_ids)}）")
+    return new_edges
+
+
+def _cross_chapter_edges(nodes: List[KGNode], edges: List[KGEdge]) -> List[KGEdge]:
+    """为相邻章节之间建立 prerequisite 关系。
+
+    逻辑：将前一章节的最后一个节点与下一章节的第一个节点用 prerequisite 连接，
+    表达章节间的知识递进关系。
+    """
+    # 按章节分组，保持顺序
+    chapter_order: List[str] = []
+    chapter_nodes: dict[str, List[KGNode]] = {}
+    for n in nodes:
+        if n.category == "图像区块":
+            continue
+        if n.chapter not in chapter_nodes:
+            chapter_order.append(n.chapter)
+            chapter_nodes[n.chapter] = []
+        chapter_nodes[n.chapter].append(n)
+
+    new_edges = list(edges)
+    existing_pairs = {(e.source, e.target) for e in edges}
+
+    for i in range(len(chapter_order) - 1):
+        prev_chapter = chapter_order[i]
+        next_chapter = chapter_order[i + 1]
+        prev_nodes = chapter_nodes.get(prev_chapter, [])
+        next_nodes = chapter_nodes.get(next_chapter, [])
+
+        if prev_nodes and next_nodes:
+            # 前一章最后一个节点 -> 下一章第一个节点
+            src = prev_nodes[-1]
+            tgt = next_nodes[0]
+            if (src.id, tgt.id) not in existing_pairs:
+                new_edges.append(KGEdge(
+                    source=src.id,
+                    target=tgt.id,
+                    relation_type="prerequisite",
+                    description=f"章节递进：{prev_chapter[:15]}→{next_chapter[:15]}",
+                ))
+                existing_pairs.add((src.id, tgt.id))
+
+    added = len(new_edges) - len(edges)
+    if added > 0:
+        print(f"[CrossChapter] 补充了 {added} 条跨章节边")
+    return new_edges
+
+
 def extract_textbook(textbook, max_workers: int = 2) -> KnowledgeGraph:
     """Map-Reduce 并行抽取：多章节并发处理（默认2并发，避免LLM端点过载）"""
     MAX_CHAPTERS = 6
@@ -208,6 +338,12 @@ def extract_textbook(textbook, max_workers: int = 2) -> KnowledgeGraph:
     visual_nodes, visual_edges = _visual_block_graph(textbook, all_nodes)
     all_nodes.extend(visual_nodes)
     all_edges.extend(visual_edges)
+
+    # 后处理：为孤立节点补边
+    all_edges = _auto_connect_isolated(all_nodes, all_edges)
+
+    # 后处理：跨章节连接
+    all_edges = _cross_chapter_edges(all_nodes, all_edges)
 
     print(f"[Map-Reduce] Reduce完成：{len(all_nodes)} 节点, {len(all_edges)} 边")
     return KnowledgeGraph(textbook_id=textbook.textbook_id, nodes=all_nodes, edges=all_edges)
