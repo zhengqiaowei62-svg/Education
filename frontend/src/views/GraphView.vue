@@ -24,6 +24,9 @@ const mergeBusy = ref(false)
 const mergeToast = ref('')
 const matrixCanvas = ref(null)
 
+// 图像区块过滤开关
+const showImageBlocks = ref(false)
+
 let graph = null
 let rawData = { nodes: [], edges: [] }
 const nodePositions = new Map()
@@ -65,10 +68,18 @@ function nodeStyle(node) {
 }
 
 function graphDataFromMerged(merged) {
+  // 过滤图像区块节点（除非用户开启了显示）
+  let filteredNodes = merged.nodes || []
+  if (!showImageBlocks.value) {
+    filteredNodes = filteredNodes.filter(n => n.category !== '图像区块')
+  }
+  const nodeIdSet = new Set(filteredNodes.map(n => n.id))
+  const filteredEdges = (merged.edges || []).filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target))
+
   return {
-    nodes: (merged.nodes || []).map((node, index) => {
+    nodes: filteredNodes.map((node, index) => {
       const saved = nodePositions.get(node.id)
-      const angle = (index / Math.max((merged.nodes || []).length, 1)) * Math.PI * 2
+      const angle = (index / Math.max(filteredNodes.length, 1)) * Math.PI * 2
       return {
         id: node.id,
         label: node.name,
@@ -78,7 +89,7 @@ function graphDataFromMerged(merged) {
         raw: node,
       }
     }),
-    edges: (merged.edges || []).map(edge => ({
+    edges: filteredEdges.map(edge => ({
       source: edge.source,
       target: edge.target,
       label: edge.relation_type,
@@ -352,6 +363,9 @@ function applyHighlight() {
 
 watch([searchQuery, filterTextbook], () => applyHighlight())
 
+// 切换图像区块显示时重新加载图谱数据
+watch(showImageBlocks, () => load())
+
 // ----- 矩阵热力图视图 -----
 // 横轴：教材；纵轴：类别；色深：节点数
 function renderMatrix() {
@@ -476,6 +490,9 @@ onBeforeUnmount(() => {
             <option value="all">全部教材</option>
             <option v-for="opt in textbookOptions" :key="opt.id" :value="opt.id">{{ opt.title }}</option>
           </select>
+          <label class="filter-checkbox">
+            <input type="checkbox" v-model="showImageBlocks" /> 显示图像区块
+          </label>
         </div>
         <div class="segmented-control mini">
           <button :class="{ active: viewMode === 'force' }" @click="switchMode('force')">漫游图</button>
